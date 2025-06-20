@@ -1,17 +1,14 @@
 import * as vscode from "vscode";
-import { Context } from "./context";
 import { post } from "./post";
 
 export function activate(context: vscode.ExtensionContext) {
-  // Application Context
-  const appContext = new Context(context);
-  appContext.debug("activate");
+  console.log("activate");
 
-  let disposable = vscode.commands.registerCommand(
+  const disposable = vscode.commands.registerCommand(
     "wordpress-post.post",
     async () => {
       try {
-        await post(appContext);
+        await post();
       } catch (e: any) {
         vscode.window.showErrorMessage(e.message);
       }
@@ -22,3 +19,4 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
+

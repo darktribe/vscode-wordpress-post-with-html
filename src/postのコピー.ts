@@ -6,11 +6,7 @@ import MarkdownIt from 'markdown-it';
 import matter from 'gray-matter';
 import { getContext } from './context';
 
-const md = new MarkdownIt({ 
-  html: true,
-  linkify: true,
-  typographer: true
-});
+const md = new MarkdownIt({ html: true });
 
 function extractRawHtmlBlocks(markdown: string): string {
   return markdown.replace(/<!--!(.*?)!-->/gs, (_, html) => html);
@@ -43,52 +39,12 @@ async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeade
   return ids;
 }
 
-async function findExistingPost(title: string, slug: string | undefined, apiBaseUrl: string, authHeader: string): Promise<number | null> {
-  try {
-    // まずスラッグで検索（より正確）
-    if (slug) {
-      const slugSearchUrl = `${apiBaseUrl}/posts?slug=${encodeURIComponent(slug)}&status=any`;
-      const slugRes = await fetch(slugSearchUrl, {
-        headers: { Authorization: authHeader }
-      });
-
-      if (slugRes.ok) {
-        const slugResults = await slugRes.json();
-        if (slugResults.length > 0) {
-          return slugResults[0].id;
-        }
-      }
-    }
-
-    // スラッグで見つからない場合はタイトルで検索
-    const titleSearchUrl = `${apiBaseUrl}/posts?search=${encodeURIComponent(title)}&status=any`;
-    const titleRes = await fetch(titleSearchUrl, {
-      headers: { Authorization: authHeader }
-    });
-
-    if (titleRes.ok) {
-      const titleResults = await titleRes.json();
-      // 完全一致するタイトルを探す
-      const exactMatch = titleResults.find((post: any) => post.title.rendered === title);
-      if (exactMatch) {
-        return exactMatch.id;
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.error('既存投稿の検索中にエラーが発生しました:', error);
-    return null;
-  }
-}
-
-async function uploadImage(filePath: string, altText: string, apiBaseUrl: string, authHeader: string): Promise<string | null> {
+async function uploadImage(filePath: string, apiBaseUrl: string, authHeader: string): Promise<string | null> {
   try {
     const fileName = path.basename(filePath);
     const fileData = await fs.readFile(filePath);
     const mimeType = mime.lookup(filePath) || 'application/octet-stream';
 
-    // Step 1: 画像をアップロード
     const res = await fetch(`${apiBaseUrl}/media`, {
       method: 'POST',
       headers: {
@@ -106,34 +62,7 @@ async function uploadImage(filePath: string, altText: string, apiBaseUrl: string
     }
 
     const json = await res.json();
-    const mediaId = json.id;
-    const sourceUrl = json.source_url;
-
-    // Step 2: ALT属性が指定されている場合、メディアのalt_textを更新
-    if (altText && altText.trim()) {
-      try {
-        const updateRes = await fetch(`${apiBaseUrl}/media/${mediaId}`, {
-          method: 'PATCH',
-          headers: {
-            Authorization: authHeader,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            alt_text: altText.trim()
-          })
-        });
-
-        if (!updateRes.ok) {
-          const errorText = await updateRes.text();
-          vscode.window.showWarningMessage(`画像「${fileName}」のALT属性設定に失敗しました。\n${errorText}`);
-          // ALT属性の設定に失敗してもアップロードされた画像URLは返す
-        }
-      } catch (updateErr) {
-        vscode.window.showWarningMessage(`画像「${fileName}」のALT属性設定中にエラーが発生しました。\n${updateErr}`);
-      }
-    }
-
-    return sourceUrl;
+    return json.source_url;
   } catch (err) {
     vscode.window.showWarningMessage(`画像「${filePath}」の読み込みに失敗しました。\n${err}`);
     return null;
@@ -148,15 +77,9 @@ async function replaceImagePaths(markdown: string, baseDir: string, apiBaseUrl: 
   while ((match = imageRegex.exec(markdown)) !== null) {
     const alt = match[1];
     const relPath = match[2];
-    
-    // URLの場合はスキップ（http://やhttps://で始まる場合）
-    if (relPath.startsWith('http://') || relPath.startsWith('https://')) {
-      continue;
-    }
-    
     const absPath = path.resolve(baseDir, relPath);
 
-    const uploadedUrl = await uploadImage(absPath, alt, apiBaseUrl, authHeader);
+    const uploadedUrl = await uploadImage(absPath, apiBaseUrl, authHeader);
     if (uploadedUrl) {
       const original = match[0];
       const replacement = `![${alt}](${uploadedUrl})`;
@@ -220,44 +143,22 @@ export async function postArticle() {
   };
 
   try {
-    // 既存の投稿を検索
-    const existingPostId = await findExistingPost(metadata.title, metadata.slug, apiBaseUrl, authHeader);
-    
-    let res: Response;
-    let actionMessage: string;
-
-    if (existingPostId) {
-      // 既存投稿を更新
-      const updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
-      res = await fetch(updateUrl, {
-        method: 'PUT',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(postData)
-      });
-      actionMessage = '記事を更新しました。';
-    } else {
-      // 新規投稿を作成
-      const postUrl = `${apiBaseUrl}/posts`;
-      res = await fetch(postUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(postData)
-      });
-      actionMessage = '記事を投稿しました。';
-    }
+    const postUrl = `${apiBaseUrl}/posts`;
+    const res = await fetch(postUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(postData)
+    });
 
     if (!res.ok) {
       const errorText = await res.text();
       throw new Error(`投稿に失敗しました: ${res.status} ${res.statusText}\n${errorText}`);
     }
 
-    vscode.window.showInformationMessage(actionMessage);
+    vscode.window.showInformationMessage('記事を投稿しました。');
   } catch (err) {
     vscode.window.showErrorMessage(`投稿中にエラーが発生しました: ${err}`);
   }

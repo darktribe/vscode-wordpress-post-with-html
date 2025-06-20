@@ -43,45 +43,6 @@ async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeade
   return ids;
 }
 
-async function findExistingPost(title: string, slug: string | undefined, apiBaseUrl: string, authHeader: string): Promise<number | null> {
-  try {
-    // まずスラッグで検索（より正確）
-    if (slug) {
-      const slugSearchUrl = `${apiBaseUrl}/posts?slug=${encodeURIComponent(slug)}&status=any`;
-      const slugRes = await fetch(slugSearchUrl, {
-        headers: { Authorization: authHeader }
-      });
-
-      if (slugRes.ok) {
-        const slugResults = await slugRes.json();
-        if (slugResults.length > 0) {
-          return slugResults[0].id;
-        }
-      }
-    }
-
-    // スラッグで見つからない場合はタイトルで検索
-    const titleSearchUrl = `${apiBaseUrl}/posts?search=${encodeURIComponent(title)}&status=any`;
-    const titleRes = await fetch(titleSearchUrl, {
-      headers: { Authorization: authHeader }
-    });
-
-    if (titleRes.ok) {
-      const titleResults = await titleRes.json();
-      // 完全一致するタイトルを探す
-      const exactMatch = titleResults.find((post: any) => post.title.rendered === title);
-      if (exactMatch) {
-        return exactMatch.id;
-      }
-    }
-
-    return null;
-  } catch (error) {
-    console.error('既存投稿の検索中にエラーが発生しました:', error);
-    return null;
-  }
-}
-
 async function uploadImage(filePath: string, altText: string, apiBaseUrl: string, authHeader: string): Promise<string | null> {
   try {
     const fileName = path.basename(filePath);
@@ -220,44 +181,22 @@ export async function postArticle() {
   };
 
   try {
-    // 既存の投稿を検索
-    const existingPostId = await findExistingPost(metadata.title, metadata.slug, apiBaseUrl, authHeader);
-    
-    let res: Response;
-    let actionMessage: string;
-
-    if (existingPostId) {
-      // 既存投稿を更新
-      const updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
-      res = await fetch(updateUrl, {
-        method: 'PUT',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(postData)
-      });
-      actionMessage = '記事を更新しました。';
-    } else {
-      // 新規投稿を作成
-      const postUrl = `${apiBaseUrl}/posts`;
-      res = await fetch(postUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: authHeader,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(postData)
-      });
-      actionMessage = '記事を投稿しました。';
-    }
+    const postUrl = `${apiBaseUrl}/posts`;
+    const res = await fetch(postUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(postData)
+    });
 
     if (!res.ok) {
       const errorText = await res.text();
       throw new Error(`投稿に失敗しました: ${res.status} ${res.statusText}\n${errorText}`);
     }
 
-    vscode.window.showInformationMessage(actionMessage);
+    vscode.window.showInformationMessage('記事を投稿しました。');
   } catch (err) {
     vscode.window.showErrorMessage(`投稿中にエラーが発生しました: ${err}`);
   }
