@@ -1,31 +1,20 @@
 import * as vscode from 'vscode';
-import * as path from 'path'; // ここが 'import * as path' に修正済みです
+import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as mime from 'mime-types';
 import MarkdownIt from 'markdown-it';
 import matter from 'gray-matter';
 import { getContext } from './context';
-import taskLists from 'markdown-it-task-lists';
-import footnote from 'markdown-it-footnote';
-import multimdTable from 'markdown-it-multimd-table';
 
-const md = new MarkdownIt({
+const md = new MarkdownIt({ 
   html: true,
   linkify: true,
   typographer: true
 });
 
-md.use(taskLists);
-md.use(footnote); // この行を追加
-md.use(multimdTable);
-
 function extractRawHtmlBlocks(markdown: string): string {
-  // HTMLコメントブロックを抽出する正しい正規表現パターン
-  // この文字列が正規表現のパターンです
-  const regexPattern = "<!--!(.*?)!-->"; // ← この全角文字の部分を、あなたが手動で半角に直してください
-  return markdown.replace(new RegExp(regexPattern, 'gs'), (_, html) => html);
+  return markdown.replace(/<!--!(.*?)!-->/gs, (_, html) => html);
 }
-
 
 async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeader: string): Promise<number[]> {
   const ids: number[] = [];
@@ -56,6 +45,7 @@ async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeade
 
 async function findExistingPost(title: string, slug: string | undefined, apiBaseUrl: string, authHeader: string): Promise<number | null> {
   try {
+    // まずスラッグで検索（より正確）
     if (slug) {
       const slugSearchUrl = `${apiBaseUrl}/posts?slug=${encodeURIComponent(slug)}&status=any`;
       const slugRes = await fetch(slugSearchUrl, {
@@ -70,6 +60,7 @@ async function findExistingPost(title: string, slug: string | undefined, apiBase
       }
     }
 
+    // スラッグで見つからない場合はタイトルで検索
     const titleSearchUrl = `${apiBaseUrl}/posts?search=${encodeURIComponent(title)}&status=any`;
     const titleRes = await fetch(titleSearchUrl, {
       headers: { Authorization: authHeader }
@@ -77,6 +68,7 @@ async function findExistingPost(title: string, slug: string | undefined, apiBase
 
     if (titleRes.ok) {
       const titleResults = await titleRes.json();
+      // 完全一致するタイトルを探す
       const exactMatch = titleResults.find((post: any) => post.title.rendered === title);
       if (exactMatch) {
         return exactMatch.id;
@@ -96,6 +88,7 @@ async function uploadImage(filePath: string, altText: string, apiBaseUrl: string
     const fileData = await fs.readFile(filePath);
     const mimeType = mime.lookup(filePath) || 'application/octet-stream';
 
+    // Step 1: 画像をアップロード
     const res = await fetch(`${apiBaseUrl}/media`, {
       method: 'POST',
       headers: {
@@ -116,6 +109,7 @@ async function uploadImage(filePath: string, altText: string, apiBaseUrl: string
     const mediaId = json.id;
     const sourceUrl = json.source_url;
 
+    // Step 2: ALT属性が指定されている場合、メディアのalt_textを更新
     if (altText && altText.trim()) {
       try {
         const updateRes = await fetch(`${apiBaseUrl}/media/${mediaId}`, {
@@ -132,6 +126,7 @@ async function uploadImage(filePath: string, altText: string, apiBaseUrl: string
         if (!updateRes.ok) {
           const errorText = await updateRes.text();
           vscode.window.showWarningMessage(`画像「${fileName}」のALT属性設定に失敗しました。\n${errorText}`);
+          // ALT属性の設定に失敗してもアップロードされた画像URLは返す
         }
       } catch (updateErr) {
         vscode.window.showWarningMessage(`画像「${fileName}」のALT属性設定中にエラーが発生しました。\n${updateErr}`);
@@ -153,11 +148,12 @@ async function replaceImagePaths(markdown: string, baseDir: string, apiBaseUrl: 
   while ((match = imageRegex.exec(markdown)) !== null) {
     const alt = match[1];
     const relPath = match[2];
-
+    
+    // URLの場合はスキップ（http://やhttps://で始まる場合）
     if (relPath.startsWith('http://') || relPath.startsWith('https://')) {
       continue;
     }
-
+    
     const absPath = path.resolve(baseDir, relPath);
 
     const uploadedUrl = await uploadImage(absPath, alt, apiBaseUrl, authHeader);
@@ -224,12 +220,14 @@ export async function postArticle() {
   };
 
   try {
+    // 既存の投稿を検索
     const existingPostId = await findExistingPost(metadata.title, metadata.slug, apiBaseUrl, authHeader);
-
+    
     let res: Response;
     let actionMessage: string;
 
     if (existingPostId) {
+      // 既存投稿を更新
       const updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
       res = await fetch(updateUrl, {
         method: 'PUT',
@@ -241,6 +239,7 @@ export async function postArticle() {
       });
       actionMessage = '記事を更新しました。';
     } else {
+      // 新規投稿を作成
       const postUrl = `${apiBaseUrl}/posts`;
       res = await fetch(postUrl, {
         method: 'POST',

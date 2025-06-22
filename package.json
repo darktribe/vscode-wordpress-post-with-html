@@ -145,6 +145,9 @@
     "cheerio": "^1.0.0-rc.10",
     "gray-matter": "^4.0.3",
     "markdown-it": "^12.3.2",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-multimd-table": "^4.2.3",
+    "markdown-it-task-lists": "^2.1.1",
     "mime-types": "^3.0.1"
   }
 }

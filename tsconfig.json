@@ -9,6 +9,10 @@
 			"ES2020",
 			"DOM"
 		],
+		"typeRoots": [
+      "./node_modules/@types",
+      "./types" // この行を追加または修正
+    ],
 		"sourceMap": true,
 		"rootDir": "src",
 		"strict": true   /* enable all strict type-checking options */
