@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import * as path from 'path'; // ここが 'import * as path' に修正済みです
+import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as mime from 'mime-types';
 import MarkdownIt from 'markdown-it';
@@ -16,7 +16,7 @@ const md = new MarkdownIt({
 });
 
 md.use(taskLists);
-md.use(footnote); // この行を追加
+md.use(footnote);
 md.use(multimdTable);
 
 function extractRawHtmlBlocks(markdown: string): string {
@@ -25,7 +25,6 @@ function extractRawHtmlBlocks(markdown: string): string {
   const regexPattern = "<!--!(.*?)!-->"; // ← この全角文字の部分を、あなたが手動で半角に直してください
   return markdown.replace(new RegExp(regexPattern, 'gs'), (_, html) => html);
 }
-
 
 async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeader: string): Promise<number[]> {
   const ids: number[] = [];
@@ -207,7 +206,13 @@ export async function postArticle() {
 
   const withUploadedImages = await replaceImagePaths(markdownBody, baseDir, apiBaseUrl, authHeader);
   const preprocessed = extractRawHtmlBlocks(withUploadedImages);
-  const html = md.render(preprocessed);
+  let html = md.render(preprocessed);
+
+  // ★ ハッシュタグを記事の最初の行として挿入
+  if (metadata.hashtag) {
+    const hashtagLine = `<p>${metadata.hashtag}</p>\n`;
+    html = hashtagLine + html;
+  }
 
   let categoryIds: number[] | undefined = undefined;
   if (Array.isArray(metadata.categories)) {
