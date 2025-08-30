@@ -1,9 +1,9 @@
 {
-  "name": "wordpress-post",
-  "displayName": "WordPress Post",
+  "name": "wordpress-post-with-html-ang-hashtag-and-polylang",
+  "displayName": "WordPress Post with HTML-Tag and Hashtag and Polylang",
   "description": "This extension posts articles to WordPress.",
-  "version": "0.0.5",
-  "publisher": "masa86",
+  "version": "0.0.9",
+  "publisher": "Akihiko-Ouchi",
   "repository": {
     "type": "git",
     "url": "https://github.com/crz33/vscode-wordpress-post"

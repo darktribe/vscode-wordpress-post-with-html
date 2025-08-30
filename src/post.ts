@@ -26,11 +26,14 @@ function extractRawHtmlBlocks(markdown: string): string {
   return markdown.replace(new RegExp(regexPattern, 'gs'), (_, html) => html);
 }
 
-async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeader: string): Promise<number[]> {
+async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeader: string, language?: string): Promise<number[]> {
   const ids: number[] = [];
 
   for (const name of names) {
-    const searchUrl = `${apiBaseUrl}/categories?search=${encodeURIComponent(name)}`;
+    let searchUrl = `${apiBaseUrl}/categories?search=${encodeURIComponent(name)}`;
+    if (language) {
+      searchUrl += `&lang=${encodeURIComponent(language)}`;
+    }
     const res = await fetch(searchUrl, {
       headers: { Authorization: authHeader }
     });
@@ -53,10 +56,13 @@ async function resolveCategoryIds(names: string[], apiBaseUrl: string, authHeade
   return ids;
 }
 
-async function findExistingPost(title: string, slug: string | undefined, apiBaseUrl: string, authHeader: string): Promise<number | null> {
+async function findExistingPost(title: string, slug: string | undefined, apiBaseUrl: string, authHeader: string, language?: string): Promise<number | null> {
   try {
     if (slug) {
-      const slugSearchUrl = `${apiBaseUrl}/posts?slug=${encodeURIComponent(slug)}&status=any`;
+      let slugSearchUrl = `${apiBaseUrl}/posts?slug=${encodeURIComponent(slug)}&status=any`;
+      if (language) {
+        slugSearchUrl += `&lang=${encodeURIComponent(language)}`;
+      }
       const slugRes = await fetch(slugSearchUrl, {
         headers: { Authorization: authHeader }
       });
@@ -69,7 +75,10 @@ async function findExistingPost(title: string, slug: string | undefined, apiBase
       }
     }
 
-    const titleSearchUrl = `${apiBaseUrl}/posts?search=${encodeURIComponent(title)}&status=any`;
+    let titleSearchUrl = `${apiBaseUrl}/posts?search=${encodeURIComponent(title)}&status=any`;
+    if (language) {
+      titleSearchUrl += `&lang=${encodeURIComponent(language)}`;
+    }
     const titleRes = await fetch(titleSearchUrl, {
       headers: { Authorization: authHeader }
     });
@@ -144,6 +153,66 @@ async function uploadImage(filePath: string, altText: string, apiBaseUrl: string
   }
 }
 
+async function resolveTagIds(names: string[], apiBaseUrl: string, authHeader: string, language?: string): Promise<number[]> {
+  const ids: number[] = [];
+
+  for (const name of names) {
+    let searchUrl = `${apiBaseUrl}/tags?search=${encodeURIComponent(name)}`;
+    if (language) {
+      searchUrl += `&lang=${encodeURIComponent(language)}`;
+    }
+    
+    const res = await fetch(searchUrl, {
+      headers: { Authorization: authHeader }
+    });
+
+    if (!res.ok) {
+      vscode.window.showWarningMessage(`タグ「${name}」の検索に失敗しました。`);
+      continue;
+    }
+
+    const results = await res.json();
+    const match = results.find((tag: any) => tag.name === name || tag.slug === name);
+
+    if (match) {
+      ids.push(match.id);
+    } else {
+      try {
+        const createData: any = { name: name };
+        if (language) {
+          createData.meta = { _locale: language };
+        }
+        
+        const createRes = await fetch(`${apiBaseUrl}/tags`, {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(createData)
+        });
+
+        if (createRes.ok) {
+          const newTag = await createRes.json();
+          ids.push(newTag.id);
+          vscode.window.showInformationMessage(`タグ「${name}」を新規作成しました。`);
+        } else {
+          vscode.window.showWarningMessage(`タグ「${name}」の作成に失敗しました。`);
+        }
+      } catch (error) {
+        vscode.window.showWarningMessage(`タグ「${name}」の作成中にエラーが発生しました。`);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function validateLanguageCode(language: string): boolean {
+  const languageRegex = /^[a-z]{2}(-[a-z]{2})?$/i;
+  return languageRegex.test(language);
+}
+
 async function replaceImagePaths(markdown: string, baseDir: string, apiBaseUrl: string, authHeader: string): Promise<string> {
   const imageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
   const replacements: [string, string][] = [];
@@ -192,6 +261,16 @@ export async function postArticle() {
     return;
   }
 
+  let language: string | undefined = undefined;
+  if (metadata.language) {
+    if (typeof metadata.language === 'string' && validateLanguageCode(metadata.language)) {
+      language = metadata.language.toLowerCase();
+      vscode.window.showInformationMessage(`言語を「${language}」に設定しました。`);
+    } else {
+      vscode.window.showWarningMessage('無効な言語コードです。言語コード例: ja, en, fr, es, zh-cn, pt-br');
+    }
+  }
+  
   const context = await getContext();
   if (!context) {
     vscode.window.showErrorMessage('WordPressの設定が取得できませんでした。');
@@ -216,7 +295,12 @@ export async function postArticle() {
 
   let categoryIds: number[] | undefined = undefined;
   if (Array.isArray(metadata.categories)) {
-    categoryIds = await resolveCategoryIds(metadata.categories, apiBaseUrl, authHeader);
+    categoryIds = await resolveCategoryIds(metadata.categories, apiBaseUrl, authHeader, language);
+  }
+
+  let tagIds: number[] | undefined = undefined;
+  if (Array.isArray(metadata.tags)) {
+    tagIds = await resolveTagIds(metadata.tags, apiBaseUrl, authHeader, language);
   }
 
   const postData: Record<string, any> = {
@@ -225,17 +309,25 @@ export async function postArticle() {
     status: metadata.status || 'draft',
     slug: metadata.slug,
     date: metadata.date,
-    categories: categoryIds
+    categories: categoryIds,
+    tags: tagIds
   };
 
+  if (language) {
+    postData.lang = language;
+  }
+
   try {
-    const existingPostId = await findExistingPost(metadata.title, metadata.slug, apiBaseUrl, authHeader);
+    const existingPostId = await findExistingPost(metadata.title, metadata.slug, apiBaseUrl, authHeader, language);
 
     let res: Response;
     let actionMessage: string;
 
     if (existingPostId) {
-      const updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
+      let updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
+      if (language) {
+        updateUrl += `?lang=${encodeURIComponent(language)}`;
+      }
       res = await fetch(updateUrl, {
         method: 'PUT',
         headers: {
@@ -244,9 +336,12 @@ export async function postArticle() {
         },
         body: JSON.stringify(postData)
       });
-      actionMessage = '記事を更新しました。';
+      actionMessage = `記事を更新しました${language ? ` (言語: ${language})` : ''}。`;
     } else {
-      const postUrl = `${apiBaseUrl}/posts`;
+      let postUrl = `${apiBaseUrl}/posts`;
+      if (language) {
+        postUrl += `?lang=${encodeURIComponent(language)}`;
+      }
       res = await fetch(postUrl, {
         method: 'POST',
         headers: {
@@ -255,7 +350,7 @@ export async function postArticle() {
         },
         body: JSON.stringify(postData)
       });
-      actionMessage = '記事を投稿しました。';
+      actionMessage = `記事を投稿しました${language ? ` (言語: ${language})` : ''}。`;
     }
 
     if (!res.ok) {
@@ -263,7 +358,16 @@ export async function postArticle() {
       throw new Error(`投稿に失敗しました: ${res.status} ${res.statusText}\n${errorText}`);
     }
 
+    const result = await res.json();
     vscode.window.showInformationMessage(actionMessage);
+    
+    if (language) {
+      console.log(`=== Polylang Debug Info ===`);
+      console.log(`Language requested: ${language}`);
+      console.log(`Post ID: ${result.id}`);
+      console.log(`Post data sent:`, postData);
+      console.log(`=== End Debug Info ===`);
+    }
   } catch (err) {
     vscode.window.showErrorMessage(`投稿中にエラーが発生しました: ${err}`);
   }
