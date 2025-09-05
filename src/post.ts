@@ -20,9 +20,7 @@ md.use(footnote);
 md.use(multimdTable);
 
 function extractRawHtmlBlocks(markdown: string): string {
-  // HTMLコメントブロックを抽出する正しい正規表現パターン
-  // この文字列が正規表現のパターンです
-  const regexPattern = "<!--!(.*?)!-->"; // ← この全角文字の部分を、あなたが手動で半角に直してください
+  const regexPattern = "<!--!(.*?)!-->";
   return markdown.replace(new RegExp(regexPattern, 'gs'), (_, html) => html);
 }
 
@@ -244,6 +242,42 @@ async function replaceImagePaths(markdown: string, baseDir: string, apiBaseUrl: 
   return updated;
 }
 
+// ★ FITテーマのSEOメタデータを更新する関数を追加
+async function updateFitSeoMetadata(postId: number, metaDescription: string | undefined, apiBaseUrl: string, authHeader: string): Promise<void> {
+  if (!metaDescription) {
+    return;
+  }
+
+  try {
+    // FITテーマ用のメタデータを更新
+    const metaData: Record<string, any> = {
+      'fit_seo_description-single': metaDescription
+    };
+
+    // WordPress REST APIのメタデータエンドポイントを使用
+    const updateRes = await fetch(`${apiBaseUrl}/posts/${postId}`, {
+      method: 'PATCH',
+      headers: {
+        Authorization: authHeader,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        meta: metaData
+      })
+    });
+
+    if (updateRes.ok) {
+      vscode.window.showInformationMessage('SEOディスクリプションを設定しました。');
+      console.log(`SEOメタデータを更新: fit_seo_description-single = "${metaDescription}"`);
+    } else {
+      const errorText = await updateRes.text();
+      vscode.window.showWarningMessage(`SEOディスクリプションの設定に失敗しました: ${errorText}`);
+    }
+  } catch (error) {
+    vscode.window.showWarningMessage(`SEOディスクリプションの設定中にエラーが発生しました: ${error}`);
+  }
+}
+
 export async function postArticle() {
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
@@ -287,7 +321,7 @@ export async function postArticle() {
   const preprocessed = extractRawHtmlBlocks(withUploadedImages);
   let html = md.render(preprocessed);
 
-  // ★ ハッシュタグを記事の最初の行として挿入
+  // ハッシュタグを記事の最初の行として挿入
   if (metadata.hashtag) {
     const hashtagLine = `<p>${metadata.hashtag}</p>\n`;
     html = hashtagLine + html;
@@ -313,6 +347,13 @@ export async function postArticle() {
     tags: tagIds
   };
 
+  // ★ FITテーマ用のメタデータを追加
+  if (metadata.meta_description) {
+    postData.meta = {
+      'fit_seo_description-single': metadata.meta_description
+    };
+  }
+
   if (language) {
     postData.lang = language;
   }
@@ -322,8 +363,10 @@ export async function postArticle() {
 
     let res: Response;
     let actionMessage: string;
+    let postId: number;
 
     if (existingPostId) {
+      postId = existingPostId;
       let updateUrl = `${apiBaseUrl}/posts/${existingPostId}`;
       if (language) {
         updateUrl += `?lang=${encodeURIComponent(language)}`;
@@ -359,13 +402,25 @@ export async function postArticle() {
     }
 
     const result = await res.json();
+    postId = result.id;
+
+    // ★ 投稿作成/更新後に、メタデータを別途更新（より確実な方法）
+    if (metadata.meta_description) {
+      await updateFitSeoMetadata(postId, metadata.meta_description, apiBaseUrl, authHeader);
+    }
+
     vscode.window.showInformationMessage(actionMessage);
     
-    if (language) {
-      console.log(`=== Polylang Debug Info ===`);
-      console.log(`Language requested: ${language}`);
-      console.log(`Post ID: ${result.id}`);
-      console.log(`Post data sent:`, postData);
+    if (language || metadata.meta_description) {
+      console.log(`=== Debug Info ===`);
+      if (language) {
+        console.log(`Language requested: ${language}`);
+      }
+      if (metadata.meta_description) {
+        console.log(`SEO Description: ${metadata.meta_description}`);
+        console.log(`Meta key used: fit_seo_description-single`);
+      }
+      console.log(`Post ID: ${postId}`);
       console.log(`=== End Debug Info ===`);
     }
   } catch (err) {
