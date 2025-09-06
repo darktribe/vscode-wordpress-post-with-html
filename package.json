@@ -2,7 +2,7 @@
   "name": "wordpress-post-with-html-ang-hashtag-and-polylang",
   "displayName": "WordPress Post with HTML-Tag and Hashtag and Polylang",
   "description": "This extension posts articles to WordPress.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "Akihiko-Ouchi",
   "repository": {
     "type": "git",

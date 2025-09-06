@@ -242,19 +242,45 @@ async function replaceImagePaths(markdown: string, baseDir: string, apiBaseUrl: 
   return updated;
 }
 
-// ★ FITテーマのSEOメタデータを更新する関数を追加
-async function updateFitSeoMetadata(postId: number, metaDescription: string | undefined, apiBaseUrl: string, authHeader: string): Promise<void> {
+// カスタムフィールドとして直接SEOメタデータを設定する関数
+async function setFitSeoMetadata(
+  postId: number, 
+  metaDescription: string | undefined, 
+  apiBaseUrl: string, 
+  authHeader: string
+): Promise<void> {
   if (!metaDescription) {
     return;
   }
 
   try {
-    // FITテーマ用のメタデータを更新
-    const metaData: Record<string, any> = {
-      'fit_seo_description-single': metaDescription
-    };
+    // WordPress REST APIのカスタムフィールドエンドポイントを使用
+    // 注意: FITテーマがREST APIでカスタムフィールドの更新をサポートしている必要があります
+    
+    // まず、テーマ固有のエンドポイントがあるか確認
+    const customEndpointUrl = `${apiBaseUrl.replace('/wp/v2', '')}/fit/v1/seo/${postId}`;
+    
+    try {
+      const customRes = await fetch(customEndpointUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          description: metaDescription
+        })
+      });
 
-    // WordPress REST APIのメタデータエンドポイントを使用
+      if (customRes.ok) {
+        vscode.window.showInformationMessage('SEOディスクリプションを設定しました（カスタムAPI）。');
+        return;
+      }
+    } catch (error) {
+      // カスタムエンドポイントが存在しない場合は続行
+    }
+
+    // 標準のメタフィールド更新を試みる（register_meta で登録されている必要がある）
     const updateRes = await fetch(`${apiBaseUrl}/posts/${postId}`, {
       method: 'PATCH',
       headers: {
@@ -262,7 +288,9 @@ async function updateFitSeoMetadata(postId: number, metaDescription: string | un
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        meta: metaData
+        meta: {
+          'fit_seo_description-single': metaDescription
+        }
       })
     });
 
@@ -270,8 +298,40 @@ async function updateFitSeoMetadata(postId: number, metaDescription: string | un
       vscode.window.showInformationMessage('SEOディスクリプションを設定しました。');
       console.log(`SEOメタデータを更新: fit_seo_description-single = "${metaDescription}"`);
     } else {
+      // エラーの詳細を取得
       const errorText = await updateRes.text();
-      vscode.window.showWarningMessage(`SEOディスクリプションの設定に失敗しました: ${errorText}`);
+      console.warn(`SEOディスクリプションの設定に失敗: ${errorText}`);
+      
+      // 代替手段: カスタムフィールドとして保存を試みる
+      const customFieldRes = await fetch(`${apiBaseUrl}/posts/${postId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          // ACFやその他のカスタムフィールドプラグインを使用している場合
+          acf: {
+            'fit_seo_description_single': metaDescription
+          },
+          // または直接カスタムフィールドとして
+          custom_fields: [
+            {
+              key: 'fit_seo_description-single',
+              value: metaDescription
+            }
+          ]
+        })
+      });
+
+      if (customFieldRes.ok) {
+        vscode.window.showInformationMessage('SEOディスクリプションを代替方法で設定しました。');
+      } else {
+        vscode.window.showWarningMessage(
+          'SEOディスクリプションの設定に失敗しました。\n' +
+          'FITテーマの管理画面から手動で設定してください。'
+        );
+      }
     }
   } catch (error) {
     vscode.window.showWarningMessage(`SEOディスクリプションの設定中にエラーが発生しました: ${error}`);
@@ -347,13 +407,6 @@ export async function postArticle() {
     tags: tagIds
   };
 
-  // ★ FITテーマ用のメタデータを追加
-  if (metadata.meta_description) {
-    postData.meta = {
-      'fit_seo_description-single': metadata.meta_description
-    };
-  }
-
   if (language) {
     postData.lang = language;
   }
@@ -404,9 +457,9 @@ export async function postArticle() {
     const result = await res.json();
     postId = result.id;
 
-    // ★ 投稿作成/更新後に、メタデータを別途更新（より確実な方法）
+    // SEOメタデータを設定（投稿作成/更新後）
     if (metadata.meta_description) {
-      await updateFitSeoMetadata(postId, metadata.meta_description, apiBaseUrl, authHeader);
+      await setFitSeoMetadata(postId, metadata.meta_description, apiBaseUrl, authHeader);
     }
 
     vscode.window.showInformationMessage(actionMessage);
